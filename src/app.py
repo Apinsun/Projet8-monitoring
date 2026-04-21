@@ -26,16 +26,39 @@ def init_connection():
 
 supabase: Client = init_connection()
 
-# 3. Chargement des données (avec cache)
 @st.cache_data(ttl=60)
 def load_production_data():
-    response = supabase.table("predictions_logs").select("*").execute()
-    if not response.data:
-        return pd.DataFrame()
+    all_data = []
+    limit = 1000
+    offset = 0
     
-    df = pd.DataFrame(response.data)
-    df['created_at'] = pd.to_datetime(df['created_at'])
-    return df
+    while True:
+        # On demande une tranche (range) de 1000 lignes
+        response = (
+            supabase.table("predictions_logs")
+            .select("*")
+            .order("created_at", desc=True)
+            .range(offset, offset + limit - 1)
+            .execute()
+        )
+        
+        batch = response.data
+        if not batch:
+            break
+            
+        all_data.extend(batch)
+        
+        # Si on a récupéré moins que la limite, c'est qu'on a fini
+        if len(batch) < limit:
+            break
+            
+        offset += limit
+        
+        # Sécurité pour ne pas boucler à l'infini si ta DB est immense
+        if offset >= 5000: 
+            break
+
+    return pd.DataFrame(all_data)
 
 @st.cache_data
 def load_reference_data():
