@@ -9,6 +9,8 @@ from dotenv import load_dotenv
 from evidently import Report
 from evidently.presets import DataDriftPreset
 
+from datetime import datetime
+
 # 1. Configuration initiale
 load_dotenv()
 st.set_page_config(page_title="Dashboard MLOps", page_icon="🏦", layout="wide")
@@ -58,7 +60,12 @@ def load_production_data():
         if offset >= 5000: 
             break
 
-    return pd.DataFrame(all_data)
+    df_final = pd.DataFrame(all_data)
+    
+    # On sauvegarde l'heure du fetch dans les métadonnées du DataFrame
+    df_final.attrs['last_fetch'] = datetime.now().strftime("%H:%M:%S")
+    
+    return df_final
 
 @st.cache_data
 def load_reference_data():
@@ -118,13 +125,37 @@ tab_kpi, tab_drift = st.tabs(["📈 Monitoring API", "🚨 Analyse du Data Drift
 
 # --- ONGLET 1 : KPIs CLASSIQUES ---
 with tab_kpi:
+    heure_maj = df_logs.attrs.get('last_fetch', 'Inconnue')
     st.success(f"✅ API sous surveillance : {len(df_logs)} requêtes loggées.")
-    
+    st.caption(f"🔄 Dernier téléchargement depuis Supabase effectué à : **{heure_maj}** (Mise à jour auto toutes les 60s)")
     col1, col2, col3 = st.columns(3)
     with col1:
         st.metric("Total des Requêtes", len(df_logs))
     with col2:
-        st.metric("Latence Moyenne", f"{round(df_logs['execution_time_ms'].mean(), 2)} ms")
+        # 1. On crée le slider (il va s'afficher juste au-dessus du chiffre)
+        # min_value : le minimum possible
+        # max_value : le maximum possible
+        # value : la valeur par défaut au chargement de la page
+        # step : on avance de 10 en 10
+        fenetre = st.slider(
+            "Fenêtre d'analyse", 
+            min_value=10, 
+            max_value=500, 
+            value=100, 
+            step=10
+        )
+        
+        # 2. On utilise la variable 'fenetre' choisie par l'utilisateur pour filtrer !
+        df_recent = df_logs.head(fenetre)
+        
+        # 3. On calcule la médiane sur cette nouvelle sélection
+        latence_mediane = df_recent['execution_time_ms'].median()
+        
+        # 4. On met à jour le titre de la métrique pour que ce soit clair
+        st.metric(
+            label=f"Latence Médiane ({fenetre} dern.)", 
+            value=f"{round(latence_mediane, 2)} ms"
+        )
     with col3:
         st.metric("Taux de Refus", f"{round((df_logs['decision'] == 'Refusé').mean() * 100, 1)} %")
 
